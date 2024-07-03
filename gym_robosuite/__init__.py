@@ -37,7 +37,6 @@ register(
             "task": "Square_D0",
             "size": (128, 128),
             "discrete_actions": True,
-            "picture_in_picture": True
             })
 
 # register(

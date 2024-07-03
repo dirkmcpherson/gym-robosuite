@@ -32,19 +32,20 @@ def vector_state_from_obs(obs):
 def image_from_obs_dict(obs_dict, size, picture_in_picture=False, grayscale=False):
     assert "agentview_image" in obs_dict, "Required image missing from obsdict"
     assert "robot0_eye_in_hand_image" in obs_dict, "Required image missing from obsdict"
+    assert picture_in_picture == False, "Not implemented"
     # print(f"agentview_image shape: {obs_dict['agentview_image'].shape}"); print(f"robot0_eye_in_hand_image shape: {obs_dict['robot0_eye_in_hand_image'].shape}")
-    if picture_in_picture:
-        small_key = "robot0_eye_in_hand_image"
-        big_key = "agentview_image"
-        size_small = 50 if size[0] >= 128 else 20
-        small_img = cv2.resize(obs_dict[small_key], (size_small, size_small), interpolation=cv2.INTER_AREA)
-        # img = cv2.flip(cv2.flip(obs_dict[big_key], 0), 1)
-        img = cv2.flip(obs_dict[big_key], 0)
-        img[:size_small, :size_small] = small_img
-        img1 = np.zeros_like(img)
-    else:
-        img = cv2.resize(obs_dict["agentview_image"], size, interpolation=cv2.INTER_AREA)
-        img1 = cv2.resize(obs_dict["robot0_eye_in_hand_image"], size, interpolation=cv2.INTER_AREA)
+    # if picture_in_picture:
+    #     small_key = "robot0_eye_in_hand_image"
+    #     big_key = "agentview_image"
+    #     size_small = 50 if size[0] >= 128 else 20
+    #     small_img = cv2.resize(obs_dict[small_key], (size_small, size_small), interpolation=cv2.INTER_AREA)
+    #     # img = cv2.flip(cv2.flip(obs_dict[big_key], 0), 1)
+    #     img = cv2.flip(obs_dict[big_key], 0)
+    #     img[:size_small, :size_small] = small_img
+    #     img1 = np.zeros_like(img)
+    # else:
+    img = cv2.resize(obs_dict["agentview_image"], size, interpolation=cv2.INTER_AREA)
+    img1 = cv2.resize(obs_dict["robot0_eye_in_hand_image"], size, interpolation=cv2.INTER_AREA)
 
     if grayscale:
         img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
@@ -77,7 +78,7 @@ class RobosuiteEnv(gym.Env):
                  keys=None,
                  discrete_actions=False,
                  seed=None,
-                 picture_in_picture=True,
+                 picture_in_picture=False,
                  grayscale=False,
                  **kwargs
                  ):
@@ -171,7 +172,7 @@ class RobosuiteEnv(gym.Env):
     def observation_space(self):
         return gym.spaces.Dict({
             'image': gym.spaces.Box(low=0, high=255, shape=(*self.size, 1 if self.grayscale else 3), dtype=np.uint8),
-            'alt_image': gym.spaces.Box(low=0, high=255, shape=(*self.size, 1 if self.grayscale else 3), dtype=np.uint8),
+            'gripper_image': gym.spaces.Box(low=0, high=255, shape=(*self.size, 1 if self.grayscale else 3), dtype=np.uint8),
             'reward': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
             'is_first': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
             'is_last': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
@@ -186,13 +187,6 @@ class RobosuiteEnv(gym.Env):
         Returns:
             np.array: Flattened environment observation space after reset occurs
         """
-        if self.seed is not None and seed is None: seed = self.seed # NOTE: using a single seed to result in deterministic environment setup
-
-        if seed is not None:
-            if isinstance(seed, int):
-                np.random.seed(seed)
-            else:
-                raise TypeError("Seed must be an integer type!")
         ob_dict = self.env.reset()
         # return self._flatten_obs(ob_dict), {}
 
@@ -200,10 +194,10 @@ class RobosuiteEnv(gym.Env):
         #     print(k, v.shape)
 
         # image = self._image_from_obs_dict(ob_dict)
-        image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=self.picture_in_picture, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
+        image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=False, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
         obs = {
             "image": image0,
-            "alt_image": image1,
+            "gripper_image": image1,
             "reward": 0.,
             "is_first": True,
             "is_last": False,
@@ -264,10 +258,10 @@ class RobosuiteEnv(gym.Env):
         if reward > 0:
             done = True
 
-        image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=self.picture_in_picture, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
+        image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=False, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
         ret_dict = {
             "image": image0,
-            "alt_image": np.zeros_like(image1),
+            "gripper_image": image1,
             "reward": reward,
             "is_first": False,
             "is_last": done,
