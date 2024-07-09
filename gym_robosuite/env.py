@@ -22,9 +22,26 @@ import robosuite as Rsuite
 from robosuite.controllers import load_controller_config
 import mimicgen_envs as mimicgen
 
+ORDERED_VSTATE_LIST = [
+    "robot0_joint_pos_cos",
+    "robot0_joint_pos_sin",
+    "robot0_joint_vel",
+    "robot0_eef_pos",
+    "robot0_eef_quat",
+]
+
+EXPECTED_VSTATE_SIZE = 42
+
 def vector_state_from_obs(obs): 
-    state_names = ['robot0_joint_pos_cos', 'robot0_joint_pos_sin', 'robot0_joint_vel']
+    state_names = ORDERED_VSTATE_LIST
+    # state_names = ['robot0_proprio-state', 'object-state']
+    # state_names = ['robot0_joint_pos_cos', 'robot0_joint_pos_sin', 'robot0_joint_vel']
     vector_state = [obs[k] for k in state_names]
+    
+    # NOTE: handle discrepency between mimigen datasets and what robosuite naturally produces.
+    if "object-state" in obs: vector_state.append(obs["object-state"])
+    elif "object" in obs: vector_state.append(obs["object"])
+
     vector_state = np.concatenate(vector_state, axis=-1)
     # print(f"Produced vector state of shape {vector_state.shape}")
     return vector_state
@@ -177,7 +194,7 @@ class RobosuiteEnv(gym.Env):
             'is_first': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
             'is_last': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
             'is_terminal': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
-            'vector_state': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(21,), dtype=np.float32),
+            'vector_state': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(EXPECTED_VSTATE_SIZE,), dtype=np.float32),
             })
     
     def reset(self, seed=None, options=None):
@@ -188,13 +205,14 @@ class RobosuiteEnv(gym.Env):
             np.array: Flattened environment observation space after reset occurs
         """
         ob_dict = self.env.reset()
-        # return self._flatten_obs(ob_dict), {}
 
         # for k,v in ob_dict.items():
-        #     print(k, v.shape)
+        #     print(k, v.shape if hasattr(v, 'shape') else len(v))
 
-        # image = self._image_from_obs_dict(ob_dict)
-        image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=False, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
+        if self.env.use_camera_obs:
+            image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=False, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
+        else:
+            image0 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); image1 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); self.last_img = np.hstack([image0, image1])
         obs = {
             "image": image0,
             "gripper_image": image1,
@@ -222,7 +240,7 @@ class RobosuiteEnv(gym.Env):
             # (self.visualization_width, self.visualization_height)
             # if visualize
             # else (self.observation_width, self.observation_height)
-        # )
+        # )robot0_joint
         # if mode in ["visualize", "human"]:
         #     height, width = self.visualize_height, self.visualize_width
         # elif mode == "rgb_array":
@@ -258,7 +276,10 @@ class RobosuiteEnv(gym.Env):
         if reward > 0:
             done = True
 
-        image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=False, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
+        if self.env.use_camera_obs:
+            image0, image1 = image_from_obs_dict(ob_dict, self.size, picture_in_picture=False, grayscale=self.grayscale); self.last_img = np.hstack([image0, image1])
+        else:
+            image0 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); image1 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); self.last_img = np.hstack([image0, image1])
         ret_dict = {
             "image": image0,
             "gripper_image": image1,
@@ -287,22 +308,3 @@ class RobosuiteEnv(gym.Env):
         """
         # Dummy args used to mimic Wrapper interface
         return self.env.reward()
-
-    # def _image_from_obs_dict(self, obs_dict):
-    #     assert "agentview_image" in obs_dict, "Required image missing from obsdict"
-    #     assert "robot0_eye_in_hand_image" in obs_dict, "Required image missing from obsdict"
-    #     # size_big = 128
-    #     size_small = 50 if self.size[0] >= 128 else 20
-    #     # small_img = cv2.resize(obs_dict["robot0_eye_in_hand_image"], (size_small, size_small), interpolation=cv2.INTER_AREA)
-    #     # img = obs_dict["agentview_image"]
-    #     # img[-size_small:, :size_small] = small_img
-
-    #     small_img = cv2.resize(obs_dict["agentview_image"], (size_small, size_small), interpolation=cv2.INTER_AREA)
-    #     img = obs_dict["robot0_eye_in_hand_image"]
-    #     # img = obs_dict["robot0_eye_in_hand_image"]
-    #     # img = cv2.flip(obs_dict["robot0_eye_in_hand_image"], 0)
-    #     img = cv2.flip(cv2.flip(obs_dict["robot0_eye_in_hand_image"], 0), 1)
-    #     img[:size_small, :size_small] = small_img
-        
-    #     self.last_img = img
-    #     return img
