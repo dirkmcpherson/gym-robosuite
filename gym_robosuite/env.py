@@ -20,7 +20,6 @@ from gym_robosuite.utils import sample_box_pose, sample_insertion_pose
 
 import robosuite as Rsuite
 from robosuite.controllers import load_controller_config
-import mimicgen_envs as mimicgen
 
 ORDERED_VSTATE_LIST = [
     "robot0_joint_pos_cos",
@@ -30,21 +29,19 @@ ORDERED_VSTATE_LIST = [
     "robot0_eef_quat",
 ]
 
-EXPECTED_VSTATE_SIZE = 42
-
 def vector_state_from_obs(obs): 
     state_names = ORDERED_VSTATE_LIST
     # state_names = ['robot0_proprio-state', 'object-state']
     # state_names = ['robot0_joint_pos_cos', 'robot0_joint_pos_sin', 'robot0_joint_vel']
-    vector_state = [obs[k] for k in state_names]
+    state = [obs[k] for k in state_names]
     
     # NOTE: handle discrepency between mimigen datasets and what robosuite naturally produces.
-    if "object-state" in obs: vector_state.append(obs["object-state"])
-    elif "object" in obs: vector_state.append(obs["object"])
+    if "object-state" in obs: state.append(obs["object-state"])
+    elif "object" in obs: state.append(obs["object"])
 
-    vector_state = np.concatenate(vector_state, axis=-1)
-    # print(f"Produced vector state of shape {vector_state.shape}")
-    return vector_state
+    state = np.concatenate(state, axis=-1)
+    # print(f"Produced vector state of shape {state.shape}")
+    return state
 
 def image_from_obs_dict(obs_dict, size, picture_in_picture=False, grayscale=False):
     assert "agentview_image" in obs_dict, "Required image missing from obsdict"
@@ -63,6 +60,13 @@ def image_from_obs_dict(obs_dict, size, picture_in_picture=False, grayscale=Fals
     # else:
     img = cv2.resize(obs_dict["agentview_image"], size, interpolation=cv2.INTER_AREA)
     img1 = cv2.resize(obs_dict["robot0_eye_in_hand_image"], size, interpolation=cv2.INTER_AREA)
+
+    # flip the img's to match the original orientation
+    img = cv2.flip(img, 0)
+
+    # cv2.imshow("img_gym", img)
+    # cv2.imshow("img1_gym", img1)
+    # cv2.waitKey(1)
 
     if grayscale:
         img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
@@ -140,9 +144,10 @@ class RobosuiteEnv(gym.Env):
         }
         self.size = size
 
-        controller_config = load_controller_config(default_controller="OSC_POSE") # Force EEF pose control
+        # controller_config = load_controller_config(default_controller="OSC_POSE") # Force EEF pose control
         env_options["camera_heights"] = size[0]; env_options["camera_widths"] = size[1]
-        self.env = Rsuite.make(task, controller_configs=controller_config, **env_options)
+        # self.env = Rsuite.make(task, controller_configs=load_controller_config(default_controller="JOINT_VELOCITY"), **env_options)
+        self.env = Rsuite.make(task, controller_configs=load_controller_config(default_controller="OSC_POSE"), **env_options)
         
         # Create name for gym
         robots = "".join([type(robot.robot_model).__name__ for robot in self.env.robots])
@@ -154,15 +159,16 @@ class RobosuiteEnv(gym.Env):
         if keys is None:
             keys = []
             # Add object obs if requested
-            if self.env.use_object_obs:
-                keys += ["object-state"]
+            # if self.env.use_object_obs:
+            #     keys += ["object-state"]
             # Add image obs if requested
-            if self.env.use_camera_obs:
-                for cam_name in self.env.camera_names:
-                    print(f"{cam_name}_image avaiable")
-                    keys += [f"{cam_name}_image"]
-                keys += [f"{cam_name}_image" for cam_name in self.env.camera_names]
+            # if self.env.use_camera_obs:
+            #     for cam_name in self.env.camera_names:
+            #         print(f"{cam_name}_image avaiable")
+            #         keys += [f"{cam_name}_image"]
+            #     keys += [f"{cam_name}_image" for cam_name in self.env.camera_names]
             # Iterate over all robots to add to state
+
             for idx in range(len(self.env.robots)):
                 keys += ["robot{}_proprio-state".format(idx)]
         self.keys = keys
@@ -171,30 +177,57 @@ class RobosuiteEnv(gym.Env):
         self.env.spec = None
 
         # set up observation and action spaces
-        self.seed = seed
+        assert self.discrete_actions == False, "Not implemented"
         obs = self.env.reset()
         self.modality_dims = {key: obs[key].shape for key in self.keys}
+        flat_ob = self._flatten_obs(obs)
+        self.obs_dim = 45 #flat_ob.size # NOTE: Vectors state we're getting from demonstrations is unclear
 
-        # print(self)
-        # print(f"\tAction space: {self.action_space}")
+        low, high = self.env.action_spec
+        self.action_space = spaces.Box(low, high)
 
-    @property
-    def action_space(self):
-        if self.discrete_actions:
-            return spaces.Discrete(len(self.discrete_action_names))
-        else:
-            return spaces.Box(*self.env.action_spec, dtype=np.float32)
+        self.seed = seed
+
+        print(f"Initialized {self.name} with state dim {self.obs_dim} and action space {self.action_space}")
+
+    def _flatten_obs(self, obs_dict, verbose=False):
+        """
+        Filters keys of interest out and concatenate the information.
+
+        Args:
+            obs_dict (OrderedDict): ordered dictionary of observations
+            verbose (bool): Whether to print out to console as observation keys are processed
+
+        Returns:
+            np.array: observations flattened into a 1d array
+
+            NOTE: direct from robosuite
+        """
+        ob_lst = []
+        for key in self.keys:
+            if key in obs_dict:
+                if verbose:
+                    print("adding key: {}".format(key))
+                ob_lst.append(np.array(obs_dict[key]).flatten())
+        return np.concatenate(ob_lst)
+
+    # @property
+    # def action_space(self):
+    #     if self.discrete_actions:
+    #         return spaces.Discrete(len(self.discrete_action_names))
+    #     else:
+    #         return spaces.Box(*self.env.action_spec, dtype=np.float32)
 
     @property
     def observation_space(self):
         return gym.spaces.Dict({
             'image': gym.spaces.Box(low=0, high=255, shape=(*self.size, 1 if self.grayscale else 3), dtype=np.uint8),
-            'gripper_image': gym.spaces.Box(low=0, high=255, shape=(*self.size, 1 if self.grayscale else 3), dtype=np.uint8),
+            # 'gripper_image': gym.spaces.Box(low=0, high=255, shape=(*self.size, 1 if self.grayscale else 3), dtype=np.uint8),
             'reward': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
             'is_first': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
             'is_last': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
             'is_terminal': gym.spaces.Box(low=0, high=1, shape=(), dtype=bool),
-            'vector_state': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(EXPECTED_VSTATE_SIZE,), dtype=np.float32),
+            'state': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.obs_dim,), dtype=np.float32),
             })
     
     def reset(self, seed=None, options=None):
@@ -215,12 +248,14 @@ class RobosuiteEnv(gym.Env):
             image0 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); image1 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); self.last_img = np.hstack([image0, image1])
         obs = {
             "image": image0,
-            "gripper_image": image1,
+            # "gripper_image": image1,
             "reward": 0.,
             "is_first": True,
             "is_last": False,
             "is_terminal": False,
-            'vector_state': vector_state_from_obs(ob_dict),
+            # 'state': vector_state_from_obs(ob_dict),
+            # 'state': self._flatten_obs(ob_dict),
+            'state': np.zeros(self.obs_dim),
         }
 
 
@@ -255,8 +290,8 @@ class RobosuiteEnv(gym.Env):
         """
         Extends vanilla step() function call to return flattened observation instead of normal OrderedDict.
 
-        Args:
-            action (np.array): Action to take in environment
+        Args:    def __call__(self, obs, done, state, training=True, human=False, force_sample=False):
+
 
         Returns:
             4-tuple:
@@ -282,12 +317,14 @@ class RobosuiteEnv(gym.Env):
             image0 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); image1 = np.zeros((*self.size, 1 if self.grayscale else 3), dtype=np.uint8); self.last_img = np.hstack([image0, image1])
         ret_dict = {
             "image": image0,
-            "gripper_image": image1,
+            # "gripper_image": image1,
             "reward": reward,
             "is_first": False,
             "is_last": done,
             "is_terminal": False,
-            'vector_state': vector_state_from_obs(ob_dict),
+            # 'state': vector_state_from_obs(ob_dict),
+            # 'state': self._flatten_obs(ob_dict),
+            'state': np.zeros(self.obs_dim),
         }
         
         truncated = False; info['is_success'] = done

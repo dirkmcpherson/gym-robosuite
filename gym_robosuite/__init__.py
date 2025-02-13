@@ -58,3 +58,22 @@ register(
             "size": (128, 128),
             "discrete_actions": True,
             })
+
+register(
+    id="gym_robosuite/Stack",
+    entry_point="gym_robosuite.env:RobosuiteEnv",
+    max_episode_steps=300,
+    # Even after seeding, the rendered observations are slightly different,
+    # so we set `nondeterministic=True` to pass `check_env` tests
+    nondeterministic=True,
+    kwargs={'env_options': 
+                {'camera_names': ['agentview', 'all-eye_in_hand'],
+                'robots': "Panda",
+                'use_camera_obs': True,
+                'has_offscreen_renderer': True,
+                'has_renderer': True,
+                'reward_shaping': False,  
+                'control_freq': 20}, 
+            "task": "Stack",
+            "size": (84, 84),
+            })
